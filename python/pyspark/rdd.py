@@ -26,10 +26,11 @@ import heapq
 import bisect
 import random
 import socket
+import inspect
 from subprocess import Popen, PIPE
 from tempfile import NamedTemporaryFile
 from threading import Thread
-from collections import defaultdict
+from collections import defaultdict, Iterator
 from itertools import chain
 from functools import reduce
 from math import sqrt, log, isinf, isnan, pow, ceil
@@ -143,6 +144,14 @@ def _load_from_socket(port, serializer):
             yield item
     finally:
         sock.close()
+
+
+def _warn_if_notgen(f):
+    if not getattr(f, '__pyspark_part_mapper', False):
+        if not (inspect.isgenerator(f) or inspect.isgeneratorfunction(f) or isinstance(f, Iterator)):
+            warnings.warn("You are mapping partitions with a function that "
+                          "does not look like an iterator or generator. This will act like `map` "
+                          "and may not work as you expect", Warning)
 
 
 def ignore_unicode_prefix(f):
@@ -313,8 +322,10 @@ class RDD(object):
         >>> rdd.mapPartitions(f).collect()
         [3, 7]
         """
+        _warn_if_notgen(f)
         def func(s, iterator):
             return f(iterator)
+        func.__pyspark_part_mapper = True
         return self.mapPartitionsWithIndex(func, preservesPartitioning)
 
     def mapPartitionsWithIndex(self, f, preservesPartitioning=False):
@@ -327,6 +338,7 @@ class RDD(object):
         >>> rdd.mapPartitionsWithIndex(f).sum()
         6
         """
+        _warn_if_notgen(f)
         return PipelinedRDD(self, f, preservesPartitioning)
 
     def mapPartitionsWithSplit(self, f, preservesPartitioning=False):
